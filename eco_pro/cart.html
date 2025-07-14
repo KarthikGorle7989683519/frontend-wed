@@ -1,0 +1,229 @@
+<!-- Include this in your HTML head or before closing </body> -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+$(document).ready(function () {
+    renderCartItems();
+    setupCheckout();
+});
+
+// Render cart items
+function renderCartItems() {
+    const cartItemsContainer = $('#cart-items');
+
+    $.ajax({
+        url: 'http://localhost:3001/api/cart',
+        method: 'GET',
+        headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('token')
+        },
+        success: function (cart) {
+            if (!cart || cart.length === 0) {
+                cartItemsContainer.html(`
+                    <div class="text-center py-5">
+                        <h5>Your cart is empty</h5>
+                        <a href="index.html" class="btn btn-primary mt-3">Continue Shopping</a>
+                    </div>
+                `);
+                updateCartTotals();
+                return;
+            }
+
+            cartItemsContainer.empty();
+
+            cart.forEach(item => {
+                const cartItem = $(`
+                    <div class="cart-item d-flex justify-content-between align-items-center mb-3 p-3 border-bottom">
+                        <div class="d-flex align-items-center">
+                            <img src="${item.image}" class="cart-item-img me-3" alt="${item.title}" style="width: 80px; height: 80px; object-fit: contain;">
+                            <div>
+                                <h6 class="mb-1">${item.title}</h6>
+                                <p class="mb-0">$${item.price.toFixed(2)}</p>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center">
+                            <div class="quantity-control me-3">
+                                <button class="btn btn-sm btn-outline-secondary decrease-quantity" data-id="${item.id}">-</button>
+                                <input type="number" class="form-control form-control-sm quantity-input mx-1" value="${item.quantity}" min="1" data-id="${item.id}" style="width: 50px;">
+                                <button class="btn btn-sm btn-outline-secondary increase-quantity" data-id="${item.id}">+</button>
+                            </div>
+                            <p class="mb-0 me-3">$${(item.price * item.quantity).toFixed(2)}</p>
+                            <button class="btn btn-sm btn-danger remove-item" data-id="${item.id}">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                `);
+                cartItemsContainer.append(cartItem);
+            });
+
+            setupCartEventListeners();
+            updateCartTotals();
+        },
+        error: function () {
+            cartItemsContainer.html(`
+                <div class="alert alert-danger">
+                    Failed to load cart. Please try again.
+                </div>
+            `);
+        }
+    });
+}
+
+// Setup cart event listeners
+function setupCartEventListeners() {
+    $('.remove-item').on('click', function () {
+        const productId = $(this).data('id');
+        removeFromCart(productId);
+    });
+
+    $('.decrease-quantity').on('click', function () {
+        const input = $(this).siblings('.quantity-input');
+        const productId = input.data('id');
+        const newQuantity = parseInt(input.val()) - 1;
+        if (newQuantity >= 1) {
+            input.val(newQuantity);
+            updateCartItemQuantity(productId, newQuantity);
+        }
+    });
+
+    $('.increase-quantity').on('click', function () {
+        const input = $(this).siblings('.quantity-input');
+        const productId = input.data('id');
+        const newQuantity = parseInt(input.val()) + 1;
+        input.val(newQuantity);
+        updateCartItemQuantity(productId, newQuantity);
+    });
+
+    $('.quantity-input').on('change', function () {
+        const productId = $(this).data('id');
+        const newQuantity = parseInt($(this).val());
+        if (newQuantity >= 1) {
+            updateCartItemQuantity(productId, newQuantity);
+        } else {
+            $(this).val(1);
+        }
+    });
+}
+
+// Update cart totals
+function updateCartTotals() {
+    const subtotalElement = $('#subtotal');
+    const totalElement = $('#total');
+
+    const cartItems = $('.cart-item');
+    if (cartItems.length === 0) {
+        subtotalElement.text('$0.00');
+        totalElement.text('$0.00');
+        return;
+    }
+
+    let subtotal = 0;
+    cartItems.each(function () {
+        const priceText = $(this).find('p.mb-0:nth-child(2)').text();
+        const price = parseFloat(priceText.replace('$', ''));
+        subtotal += price;
+    });
+
+    const shipping = 5.00;
+    const total = subtotal + shipping;
+
+    subtotalElement.text(`$${subtotal.toFixed(2)}`);
+    totalElement.text(`$${total.toFixed(2)}`);
+}
+
+// Remove item from cart
+function removeFromCart(productId) {
+    $.ajax({
+        url: `http://localhost:3001/api/cart/${productId}`,
+        method: 'DELETE',
+        headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('token')
+        },
+        success: function () {
+            renderCartItems();
+            updateCartCount();
+            showAlert('Item removed from cart', 'success');
+        },
+        error: function () {
+            showAlert('Failed to remove item', 'danger');
+        }
+    });
+}
+
+// Update cart item quantity
+function updateCartItemQuantity(productId, quantity) {
+    $.ajax({
+        url: `http://localhost:3001/api/cart/${productId}`,
+        method: 'PUT',
+        contentType: 'application/json',
+        headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('token')
+        },
+        data: JSON.stringify({ quantity }),
+        success: function () {
+            renderCartItems();
+            updateCartCount();
+        },
+        error: function () {
+            showAlert('Failed to update quantity', 'danger');
+        }
+    });
+}
+
+// Setup checkout button
+function setupCheckout() {
+    const checkoutButton = $('#checkout-btn');
+    if (checkoutButton.length) {
+        checkoutButton.on('click', function () {
+            const user = localStorage.getItem('user');
+            if (!user) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            $.ajax({
+                url: 'http://localhost:3001/api/orders/checkout',
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + localStorage.getItem('token')
+                },
+                success: function () {
+                    showAlert('Order placed successfully!', 'success');
+                    localStorage.setItem('cart', JSON.stringify([]));
+                    updateCartCount();
+                    setTimeout(() => window.location.href = 'user.html', 2000);
+                },
+                error: function () {
+                    showAlert('Checkout failed. Please try again.', 'danger');
+                }
+            });
+        });
+    }
+}
+
+// Utility: show alert
+function showAlert(message, type = 'info') {
+    const alertBox = $(`
+        <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    `);
+    $('body').prepend(alertBox);
+    setTimeout(() => alertBox.alert('close'), 3000);
+}
+
+// Utility: update cart count (optional)
+function updateCartCount() {
+    $.ajax({
+        url: 'http://localhost:3001/api/cart',
+        method: 'GET',
+        headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('token')
+        },
+        success: function (cart) {
+            $('#cart-count').text(cart.length || 0);
+        }
+    });
+}
+</script>
